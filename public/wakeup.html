@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wake Up Server</title>
+    <title>Server Status - Auto Wake Up</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -18,113 +18,216 @@
         .container {
             background: white;
             padding: 40px;
-            border-radius: 12px;
+            border-radius: 20px;
             text-align: center;
             max-width: 500px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
         }
         h1 { color: #2c3e50; margin-bottom: 10px; }
-        p { color: #666; margin-bottom: 20px; }
-        button {
-            background: #3498db;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
-            font-size: 16px;
-            cursor: pointer;
-            margin: 5px;
-        }
-        button:hover { background: #2980b9; }
         .status {
-            margin-top: 20px;
-            padding: 10px;
-            border-radius: 6px;
-            display: none;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            font-weight: bold;
         }
-        .status.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-            display: block;
-        }
-        .status.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-            display: block;
-        }
-        .status.warning {
-            background: #fff3cd;
-            color: #856404;
-            border: 1px solid #ffeeba;
-            display: block;
-        }
+        .status.checking { background: #fff3cd; color: #856404; }
+        .status.online { background: #d4edda; color: #155724; }
+        .status.offline { background: #f8d7da; color: #721c24; }
         .spinner {
             display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 2px solid #f3f3f3;
-            border-top: 2px solid #3498db;
+            width: 30px;
+            height: 30px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
             border-radius: 50%;
             animation: spin 1s linear infinite;
-            margin-right: 8px;
+            margin-right: 10px;
         }
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #ecf0f1;
+            border-radius: 4px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+        .progress-fill {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #2ecc71, #3498db);
+            transition: width 0.3s;
+        }
+        .log {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 12px;
+            text-align: left;
+            margin-top: 20px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            margin: 5px 0;
+            border-bottom: 1px solid #34495e;
+            padding: 3px 0;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover { background: #2980b9; }
+        .auto-text {
+            color: #2ecc71;
+            font-size: 14px;
+            margin-top: 15px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🌙 Wake Up Server</h1>
-        <p>Your backend server is sleeping. Click the button below to wake it up.</p>
-        <button onclick="wakeUpServer()">🚀 Wake Up Server</button>
-        <div id="status" class="status"></div>
-        <div style="margin-top: 20px; font-size: 12px; color: #999;">
-            <p>Render free tier servers sleep after 15 minutes of inactivity.</p>
-            <p>First request may take 30-60 seconds to respond.</p>
+        <h1>🚀 Restaurant Backend</h1>
+        <p>Server Status Monitor</p>
+        
+        <div id="status" class="status checking">
+            <span class="spinner"></span> Checking server status...
+        </div>
+        
+        <div class="progress-bar">
+            <div id="progressFill" class="progress-fill"></div>
+        </div>
+        
+        <div id="log" class="log">
+            <div class="log-entry">⏳ Initializing...</div>
+        </div>
+        
+        <div class="auto-text">
+            🤖 Server automatically wakes up on page load
         </div>
     </div>
 
     <script>
         const BACKEND_URL = 'https://restaurant-backend-7lyz.onrender.com';
+        let progress = 0;
+        let attempts = 0;
+        const maxAttempts = 12;
+        
+        const statusDiv = document.getElementById('status');
+        const progressFill = document.getElementById('progressFill');
+        const logDiv = document.getElementById('log');
+        
+        function addLog(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            const time = new Date().toLocaleTimeString();
+            const icon = type === 'success' ? '✅' : type === 'error' ? '❌' : '⏳';
+            entry.innerHTML = `[${time}] ${icon} ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
         
         async function wakeUpServer() {
-            const statusDiv = document.getElementById('status');
-            statusDiv.className = 'status warning';
-            statusDiv.innerHTML = '<div class="spinner"></div> Waking up server... Please wait up to 60 seconds.';
+            addLog('🌙 Attempting to wake up server automatically...');
             
-            let attempts = 0;
-            const maxAttempts = 12; // 12 * 5 = 60 seconds
+            const endpoints = [
+                `${BACKEND_URL}/ping`,
+                `${BACKEND_URL}/api/status`,
+                `${BACKEND_URL}/health`,
+                `${BACKEND_URL}/api/products`
+            ];
             
-            while (attempts < maxAttempts) {
-                attempts++;
-                statusDiv.innerHTML = `<div class="spinner"></div> Attempt ${attempts}/${maxAttempts} - Waking up server...`;
+            for (let i = 0; i < endpoints.length; i++) {
+                addLog(`📡 Trying endpoint ${i + 1}: ${endpoints[i]}`);
                 
                 try {
-                    const response = await fetch(`${BACKEND_URL}/ping`, {
+                    const response = await fetch(endpoints[i], {
                         method: 'GET',
                         headers: { 'Cache-Control': 'no-cache' }
                     });
                     
-                    if (response.ok) {
-                        statusDiv.className = 'status success';
-                        statusDiv.innerHTML = '✅ Server is now awake! You can now login to the admin dashboard.';
-                        return;
+                    if (response.ok || response.status === 404) {
+                        addLog(`✅ Server responded from ${endpoints[i]}`, 'success');
+                        progress = Math.min(progress + 25, 100);
+                        progressFill.style.width = progress + '%';
+                        
+                        await new Promise(r => setTimeout(r, 1000));
+                        return true;
                     }
                 } catch (error) {
-                    // Server still waking up, continue
-                    console.log(`Attempt ${attempts} failed`);
+                    addLog(`⚠️ Endpoint ${i + 1} failed: ${error.message}`);
                 }
                 
-                await new Promise(resolve => setTimeout(resolve, 5000));
+                progress = Math.min(progress + 10, 90);
+                progressFill.style.width = progress + '%';
+                await new Promise(r => setTimeout(r, 2000));
             }
             
-            statusDiv.className = 'status error';
-            statusDiv.innerHTML = '❌ Server failed to wake up. Please try again in a few minutes.';
+            return false;
         }
-    </script> 
+        
+        async function checkServer() {
+            statusDiv.className = 'status checking';
+            statusDiv.innerHTML = '<span class="spinner"></span> Waking up server (30-60 seconds)...';
+            addLog('🔍 Starting server wake-up process...');
+            
+            progress = 10;
+            progressFill.style.width = progress + '%';
+            
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                addLog(`🔄 Attempt ${attempt}/${maxAttempts} - Waking up server...`);
+                
+                const success = await wakeUpServer();
+                
+                if (success) {
+                    // Verify server is fully awake
+                    try {
+                        const verify = await fetch(`${BACKEND_URL}/ping`);
+                        if (verify.ok) {
+                            statusDiv.className = 'status online';
+                            statusDiv.innerHTML = '✅ Server is ONLINE and ready!';
+                            addLog('🎉 Server is fully awake and operational!', 'success');
+                            progressFill.style.width = '100%';
+                            return;
+                        }
+                    } catch (e) {
+                        addLog(`⚠️ Verification failed, continuing...`);
+                    }
+                }
+                
+                progress = Math.min(progress + (80 / maxAttempts), 90);
+                progressFill.style.width = progress + '%';
+                
+                if (attempt < maxAttempts) {
+                    await new Promise(r => setTimeout(r, 5000));
+                }
+            }
+            
+            statusDiv.className = 'status offline';
+            statusDiv.innerHTML = '❌ Server failed to wake up. Please check Render logs.';
+            addLog('❌ Server wake-up failed after all attempts', 'error');
+        }
+        
+        // Auto start on page load
+        checkServer();
+        
+        // Auto refresh every 30 seconds to keep server awake
+        setInterval(() => {
+            fetch(`${BACKEND_URL}/ping`).catch(() => {});
+            addLog('🔄 Keep-alive ping sent');
+        }, 25000);
+    </script>
 </body>
 </html>
