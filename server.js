@@ -18,36 +18,75 @@ global.pingCount = 0;
 global.lastPing = null;
 global.startTime = Date.now();
 
-// ==================== FIXED CORS CONFIGURATION ====================
-// Allow all origins for testing (you can restrict later)
+// ==================== COMPLETE CORS FIX ====================
+// Allow all origins for now (for testing)
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:5173',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001',
+  'https://restaurant-backend-7lyz.onrender.com',
+  'https://your-frontend.vercel.app',
+  'https://your-admin.vercel.app'
+];
+
 const corsOptions = {
-  origin: '*', // Allow all origins temporarily
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
+      callback(null, true);
+    } else {
+      console.log('Origin not allowed:', origin);
+      callback(null, true); // Allow all for now
+    }
+  },
   credentials: true,
   optionsSuccessStatus: 200,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'Access-Control-Allow-Origin',
+    'Access-Control-Allow-Headers',
+    'Access-Control-Allow-Methods'
+  ],
   exposedHeaders: ['Content-Length', 'X-Requested-With'],
   preflightContinue: false,
   maxAge: 86400 // 24 hours
 };
 
-// Apply CORS middleware first
+// Apply CORS middleware
 app.use(cors(corsOptions));
 
-// Add additional CORS headers
+// Additional CORS headers middleware
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  // Allow all origins in development
+  const origin = req.headers.origin;
+  if (origin) {
+    res.header('Access-Control-Allow-Origin', origin);
+  } else {
+    res.header('Access-Control-Allow-Origin', '*');
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Max-Age', '86400');
   
   // Handle preflight requests
   if (req.method === 'OPTIONS') {
     return res.status(200).json({});
   }
+  
   next();
 });
 
+// Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -57,7 +96,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Request logging middleware
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] ${req.method} ${req.path} - IP: ${req.ip}`);
+  console.log(`[${timestamp}] ${req.method} ${req.path} - Origin: ${req.headers.origin || 'unknown'}`);
   
   // Track keep-alive pings
   if (req.path === '/api/keep-alive' || req.path === '/keep-alive' || req.path === '/ping') {
@@ -65,7 +104,6 @@ app.use((req, res, next) => {
     global.lastPing = timestamp;
   }
   
-  // Add response time header
   const start = Date.now();
   res.on('finish', () => {
     const duration = Date.now() - start;
@@ -110,7 +148,6 @@ app.get('/api/keep-alive', (req, res) => {
   const memoryUsage = process.memoryUsage();
   const currentTime = new Date().toISOString();
   
-  // Format uptime
   const days = Math.floor(uptime / 86400);
   const hours = Math.floor((uptime % 86400) / 3600);
   const minutes = Math.floor((uptime % 3600) / 60);
@@ -145,13 +182,10 @@ app.get('/api/keep-alive', (req, res) => {
   });
 });
 
-// Health check endpoint (for uptime monitors)
+// Health check endpoint
 app.get('/health', async (req, res) => {
   try {
-    // Check database connection
     const dbStatus = mongoose.connection.readyState === 1 ? 'healthy' : 'unhealthy';
-    
-    // Check memory usage
     const memoryUsage = process.memoryUsage();
     const memoryHealthy = memoryUsage.heapUsed / memoryUsage.heapTotal < 0.9;
     
@@ -299,7 +333,6 @@ process.on('SIGINT', () => {
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
-  // Gracefully shutdown
   server.close(() => {
     process.exit(1);
   });
@@ -308,7 +341,6 @@ process.on('uncaughtException', (err) => {
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err) => {
   console.error('Unhandled Rejection:', err);
-  // Gracefully shutdown
   server.close(() => {
     process.exit(1);
   });
