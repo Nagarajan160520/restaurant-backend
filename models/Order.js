@@ -24,9 +24,13 @@ const orderSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
+  subtotal: Number,
+  tax: Number,
+  deliveryFee: Number,
+  discount: Number,
   status: {
     type: String,
-    enum: ['pending', 'processing', 'completed', 'cancelled'],
+    enum: ['pending', 'processing', 'ready', 'out_for_delivery', 'completed', 'cancelled'],
     default: 'pending'
   },
   paymentMethod: {
@@ -34,6 +38,21 @@ const orderSchema = new mongoose.Schema({
     enum: ['cash', 'card', 'online'],
     default: 'cash'
   },
+  deliveryAddress: {
+    type: String,
+    default: 'Not provided'
+  },
+  phone: {
+    type: String,
+    default: 'Not provided'
+  },
+  notes: [{
+    message: String,
+    date: Date,
+    by: String
+  }],
+  cancelledAt: Date,
+  cancelReason: String,
   createdAt: {
     type: Date,
     default: Date.now
