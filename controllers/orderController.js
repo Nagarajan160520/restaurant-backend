@@ -3,9 +3,141 @@ const Notification = require('../models/Notification');
 const User = require('../models/User');
 const smsService = require('../services/smsService');
 
-// ... (keep existing code)
+// @desc    Get all orders (admin sees all, user sees their own)
+// @route   GET /api/orders
+// @access  Private
+const getOrders = async (req, res) => {
+  try {
+    let query = {};
+    
+    if (req.user.role !== 'admin') {
+      query.user = req.user._id;
+    }
+    
+    const orders = await Order.find(query)
+      .populate('user', 'name email phone')
+      .populate('items.product')
+      .sort({ createdAt: -1 });
+    
+    res.json(orders);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 
-// Update order status with SMS notifications
+// @desc    Get single order by ID
+// @route   GET /api/orders/:id
+// @access  Private
+const getOrderById = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+      .populate('user', 'name email phone')
+      .populate('items.product');
+    
+    if (order) {
+      if (req.user.role === 'admin' || order.user._id.toString() === req.user._id.toString()) {
+        res.json(order);
+      } else {
+        res.status(401).json({ message: 'Not authorized' });
+      }
+    } else {
+      res.status(404).json({ message: 'Order not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Create a new order
+// @route   POST /api/orders
+// @access  Private
+const createOrder = async (req, res) => {
+  try {
+    const { 
+      items, 
+      totalAmount, 
+      paymentMethod, 
+      deliveryAddress, 
+      phone,
+      customerName,
+      customerEmail,
+      subtotal,
+      tax,
+      deliveryFee,
+      discount
+    } = req.body;
+    
+    // Validate phone number
+    if (!phone || !/^[0-9]{10}$/.test(phone)) {
+      return res.status(400).json({ 
+        message: 'Please provide a valid 10-digit phone number for order updates' 
+      });
+    }
+    
+    // Create order
+    const order = await Order.create({
+      user: req.user._id,
+      items,
+      totalAmount: totalAmount || (subtotal + (deliveryFee || 40) + (tax || 0) - (discount || 0)),
+      subtotal: subtotal || items.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+      tax: tax || 0,
+      deliveryFee: deliveryFee || 40,
+      discount: discount || 0,
+      paymentMethod: paymentMethod || 'cash',
+      deliveryAddress: deliveryAddress || 'Not provided',
+      phone: phone,
+      status: 'pending'
+    });
+    
+    const populatedOrder = await Order.findById(order._id)
+      .populate('user', 'name email phone');
+    
+    // Create notification for admin
+    await Notification.create({
+      title: 'New Order Received!',
+      message: `New order #${order._id.toString().slice(-6)} from ${req.user.name} (${phone}) for ₹${order.totalAmount}`,
+      type: 'order',
+      forUsers: false,
+      isActive: true,
+      orderId: order._id,
+      metadata: {
+        customerName: req.user.name,
+        customerPhone: phone,
+        total: order.totalAmount
+      }
+    });
+    
+    // Create notification for customer (in-app)
+    await Notification.create({
+      title: 'Order Placed Successfully!',
+      message: `Your order #${order._id.toString().slice(-6)} has been placed successfully. Total: ₹${order.totalAmount}. We'll notify you when it's being prepared.`,
+      type: 'order',
+      forUsers: true,
+      userId: req.user._id,
+      isActive: true,
+      orderId: order._id
+    });
+    
+    // Send SMS confirmation to customer
+    if (phone) {
+      await smsService.sendOrderConfirmation(
+        phone,
+        order._id.toString().slice(-6),
+        order.totalAmount,
+        items
+      );
+    }
+    
+    res.status(201).json(populatedOrder);
+  } catch (error) {
+    console.error('Error creating order:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Update order status
+// @route   PUT /api/orders/:id
+// @access  Private/Admin
 const updateOrderStatus = async (req, res) => {
   try {
     const { status, note } = req.body;
@@ -54,7 +186,7 @@ const updateOrderStatus = async (req, res) => {
       case 'completed':
         notificationTitle = 'Order Delivered!';
         notificationMessage = `Your order #${order._id.toString().slice(-6)} has been delivered. Thank you for ordering with us!`;
-        smsMessage = `🎉 ${notificationMessage} Rate your experience: ${process.env.FRONTEND_URL}/orders`;
+        smsMessage = `🎉 ${notificationMessage} Rate your experience: ${process.env.FRONTEND_URL || 'http://localhost:3000'}/orders`;
         break;
       case 'cancelled':
         notificationTitle = 'Order Cancelled';
@@ -92,65 +224,124 @@ const updateOrderStatus = async (req, res) => {
             reason: note
           }
         );
+      } else if (order.phone) {
+        // Use order phone if user phone is not available
+        await smsService.sendOrderStatusUpdate(
+          order.phone,
+          order._id.toString().slice(-6),
+          status,
+          {
+            total: order.totalAmount,
+            phone: order.phone,
+            reason: note
+          }
+        );
       }
     }
     
     res.json(updatedOrder);
   } catch (error) {
+    console.error('Error updating order status:', error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// Create order with SMS confirmation
-const createOrder = async (req, res) => {
+// @desc    Cancel order
+// @route   PUT /api/orders/:id/cancel
+// @access  Private (both user and admin can cancel)
+const cancelOrder = async (req, res) => {
   try {
-    const { items, totalAmount, paymentMethod, deliveryAddress, phone } = req.body;
+    const { reason } = req.body;
+    const order = await Order.findById(req.params.id).populate('user', 'name email phone');
     
-    const order = await Order.create({
-      user: req.user._id,
-      items,
-      totalAmount,
-      paymentMethod,
-      deliveryAddress: deliveryAddress || 'Not provided',
-      phone: phone || req.user.phone || 'Not provided',
-      status: 'pending'
-    });
-    
-    const populatedOrder = await Order.findById(order._id)
-      .populate('user', 'name email phone');
-    
-    // Create notification for admin
-    await Notification.create({
-      title: 'New Order Received!',
-      message: `New order #${order._id.toString().slice(-6)} from ${req.user.name} (${req.user.phone}) for ₹${totalAmount}`,
-      type: 'order',
-      forUsers: false,
-      isActive: true,
-      orderId: order._id
-    });
-    
-    // Create notification for customer
-    await Notification.create({
-      title: 'Order Placed Successfully!',
-      message: `Your order #${order._id.toString().slice(-6)} has been placed successfully. Total: ₹${totalAmount}`,
-      type: 'order',
-      forUsers: true,
-      userId: req.user._id,
-      isActive: true,
-      orderId: order._id
-    });
-    
-    // Send SMS confirmation
-    if (req.user.phone) {
-      await smsService.sendOrderConfirmation(
-        req.user.phone,
-        order._id.toString().slice(-6),
-        totalAmount,
-        items
-      );
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
     }
     
-    res.status(201).json(populatedOrder);
+    // Check if user is authorized to cancel (either owner or admin)
+    if (req.user.role !== 'admin' && order.user._id.toString() !== req.user._id.toString()) {
+      return res.status(401).json({ message: 'Not authorized to cancel this order' });
+    }
+    
+    // Check if order can be cancelled (only pending or processing)
+    if (order.status !== 'pending' && order.status !== 'processing') {
+      return res.status(400).json({ 
+        message: 'Order cannot be cancelled at this stage. It is already ' + order.status 
+      });
+    }
+    
+    order.status = 'cancelled';
+    order.cancelledAt = new Date();
+    order.cancelReason = reason || (req.user.role === 'admin' ? 'Cancelled by admin' : 'Cancelled by customer');
+    
+    const updatedOrder = await order.save();
+    
+    // Create cancellation notification for customer
+    if (order.user) {
+      await Notification.create({
+        title: 'Order Cancelled',
+        message: `Your order #${order._id.toString().slice(-6)} has been cancelled. Reason: ${order.cancelReason}`,
+        type: 'order',
+        forUsers: true,
+        userId: order.user._id,
+        isActive: true,
+        orderId: order._id
+      });
+      
+      // Send SMS cancellation notification
+      if (order.user.phone) {
+        await smsService.sendOrderStatusUpdate(
+          order.user.phone,
+          order._id.toString().slice(-6),
+          'cancelled',
+          { reason: order.cancelReason }
+        );
+      }
+    }
+    
+    // Notify admin about cancellation (if cancelled by customer)
+    if (req.user.role !== 'admin') {
+      await Notification.create({
+        title: 'Order Cancelled by Customer',
+        message: `Order #${order._id.toString().slice(-6)} has been cancelled by ${order.user.name}. Reason: ${order.cancelReason}`,
+        type: 'order',
+        forUsers: false,
+        isActive: true,
+        orderId: order._id
+      });
+    }
+    
+    res.json(updatedOrder);
+  } catch (error) {
+    console.error('Error cancelling order:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get order statistics for admin dashboard
+// @route   GET /api/orders/stats
+// @access  Private/Admin
+const getOrderStats = async (req, res) => {
+  try {
+    const totalOrders = await Order.countDocuments();
+    const pendingOrders = await Order.countDocuments({ status: 'pending' });
+    const processingOrders = await Order.countDocuments({ status: 'processing' });
+    const completedOrders = await Order.countDocuments({ status: 'completed' });
+    const cancelledOrders = await Order.countDocuments({ status: 'cancelled' });
+    
+    const totalRevenue = await Order.aggregate([
+      { $match: { status: { $ne: 'cancelled' } } },
+      { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+    ]);
+    
+    res.json({
+      total: totalOrders,
+      pending: pendingOrders,
+      processing: processingOrders,
+      completed: completedOrders,
+      cancelled: cancelledOrders,
+      revenue: totalRevenue[0]?.total || 0
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -161,5 +352,6 @@ module.exports = {
   getOrderById,
   createOrder,
   updateOrderStatus,
-  cancelOrder
+  cancelOrder,
+  getOrderStats
 };

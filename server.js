@@ -18,8 +18,7 @@ global.pingCount = 0;
 global.lastPing = null;
 global.startTime = Date.now();
 
-// ==================== COMPLETE CORS FIX ====================
-// Allow all origins for now (for testing)
+// ==================== CORS CONFIGURATION ====================
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
@@ -58,7 +57,7 @@ const corsOptions = {
   ],
   exposedHeaders: ['Content-Length', 'X-Requested-With'],
   preflightContinue: false,
-  maxAge: 86400 // 24 hours
+  maxAge: 86400
 };
 
 // Apply CORS middleware
@@ -66,7 +65,6 @@ app.use(cors(corsOptions));
 
 // Additional CORS headers middleware
 app.use((req, res, next) => {
-  // Allow all origins in development
   const origin = req.headers.origin;
   if (origin) {
     res.header('Access-Control-Allow-Origin', origin);
@@ -122,6 +120,7 @@ const orderRoutes = require('./routes/orderRoutes');
 const expenseRoutes = require('./routes/expenseRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const categoryRoutes = require('./routes/categoryRoutes');
+const billRoutes = require('./routes/billRoutes');
 
 // Use routes
 app.use('/api/auth', authRoutes);
@@ -130,6 +129,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/categories', categoryRoutes);
+app.use('/api/bills', billRoutes);
 
 // ==================== KEEP-ALIVE ENDPOINTS ====================
 
@@ -138,7 +138,8 @@ app.get('/ping', (req, res) => {
   res.status(200).json({ 
     status: 'alive', 
     timestamp: new Date().toISOString(),
-    message: 'pong'
+    message: 'pong',
+    uptime: process.uptime()
   });
 });
 
@@ -195,7 +196,8 @@ app.get('/health', async (req, res) => {
       checks: {
         database: dbStatus,
         memory: memoryHealthy ? 'healthy' : 'warning',
-        uptime: process.uptime()
+        uptime: process.uptime(),
+        pingCount: global.pingCount
       }
     });
   } catch (error) {
@@ -229,6 +231,7 @@ app.get('/api/status', (req, res) => {
       expenses: '/api/expenses',
       notifications: '/api/notifications',
       categories: '/api/categories',
+      bills: '/api/bills',
       keepAlive: '/api/keep-alive',
       health: '/health',
       status: '/status'
@@ -242,6 +245,15 @@ app.get('/', (req, res) => {
   res.json({ 
     message: '🍽️ Restaurant E-commerce API is running',
     version: '1.0.0',
+    features: {
+      auth: 'User authentication with JWT',
+      products: 'Product management with stock tracking',
+      orders: 'Order management with status updates',
+      bills: 'Billing system with invoice generation',
+      inventory: 'Stock management with low stock alerts',
+      notifications: 'Real-time notifications',
+      reports: 'Financial reports and analytics'
+    },
     documentation: {
       status: '/status',
       health: '/health',
@@ -249,8 +261,16 @@ app.get('/', (req, res) => {
       keepAlive: '/api/keep-alive'
     },
     serverTime: new Date().toISOString(),
-    uptime: `${Math.floor(process.uptime() / 60)} minutes`
+    uptime: `${Math.floor(process.uptime() / 60)} minutes`,
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
   });
+});
+
+// ==================== WAKEUP PAGE ====================
+
+// Serve wakeup HTML page
+app.get('/wakeup.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'wakeup.html'));
 });
 
 // ==================== 404 HANDLER ====================
@@ -265,9 +285,34 @@ app.use((req, res, next) => {
       health: 'GET /health',
       api: 'GET /api/status',
       keepAlive: 'GET /api/keep-alive',
-      auth: 'POST /api/auth/login, POST /api/auth/register',
-      products: 'GET /api/products, POST /api/products (admin)',
-      categories: 'GET /api/categories'
+      wakeup: 'GET /wakeup.html',
+      auth: {
+        register: 'POST /api/auth/register',
+        login: 'POST /api/auth/login',
+        me: 'GET /api/auth/me'
+      },
+      products: {
+        list: 'GET /api/products',
+        create: 'POST /api/products (admin)',
+        update: 'PUT /api/products/:id (admin)',
+        delete: 'DELETE /api/products/:id (admin)',
+        lowStock: 'GET /api/products/low-stock',
+        outOfStock: 'GET /api/products/out-of-stock',
+        updateStock: 'PUT /api/products/:id/stock (admin)'
+      },
+      orders: {
+        list: 'GET /api/orders',
+        create: 'POST /api/orders',
+        update: 'PUT /api/orders/:id (admin)',
+        cancel: 'PUT /api/orders/:id/cancel'
+      },
+      bills: {
+        create: 'POST /api/bills (admin)',
+        list: 'GET /api/bills (admin)',
+        dailySales: 'GET /api/bills/daily-sales (admin)'
+      },
+      categories: 'GET /api/categories',
+      notifications: 'GET /api/notifications'
     }
   });
 });
@@ -303,6 +348,16 @@ const server = app.listen(PORT, () => {
   console.log(`📊 Status Page: http://localhost:${PORT}/status`);
   console.log(`💓 Health Check: http://localhost:${PORT}/health`);
   console.log(`🔄 Keep Alive: http://localhost:${PORT}/api/keep-alive`);
+  console.log(`🌙 Wakeup Page: http://localhost:${PORT}/wakeup.html`);
+  console.log(`=================================`);
+  console.log(`📦 Features:`);
+  console.log(`   - User Authentication`);
+  console.log(`   - Product Management with Stock Tracking`);
+  console.log(`   - Order Management with SMS Notifications`);
+  console.log(`   - Billing System with Invoice Generation`);
+  console.log(`   - Inventory Management with Low Stock Alerts`);
+  console.log(`   - Real-time Notifications`);
+  console.log(`   - Financial Reports`);
   console.log(`=================================\n`);
 });
 
