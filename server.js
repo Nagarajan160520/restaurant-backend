@@ -18,24 +18,36 @@ global.pingCount = 0;
 global.lastPing = null;
 global.startTime = Date.now();
 
-// CORS configuration
+// ==================== FIXED CORS CONFIGURATION ====================
+// Allow all origins for testing (you can restrict later)
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' 
-    ? [
-        'https://your-frontend.vercel.app', 
-        'https://your-admin.vercel.app',
-        'http://localhost:3000',
-        'http://localhost:3001'
-      ] 
-    : '*',
+  origin: '*', // Allow all origins temporarily
   credentials: true,
   optionsSuccessStatus: 200,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  exposedHeaders: ['Content-Length', 'X-Requested-With'],
+  preflightContinue: false,
+  maxAge: 86400 // 24 hours
 };
 
-// Middleware
+// Apply CORS middleware first
 app.use(cors(corsOptions));
+
+// Add additional CORS headers
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).json({});
+  }
+  next();
+});
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -302,4 +314,4 @@ process.on('unhandledRejection', (err) => {
   });
 });
 
-module.exports = app; // For testing
+module.exports = app;
