@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
+const smsService = require('../services/smsService');
 
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -9,24 +10,41 @@ const generateToken = (id) => {
 
 const registerUser = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, phone } = req.body;
+    
+    // Validate phone number
+    if (!phone || !/^[0-9]{10}$/.test(phone)) {
+      return res.status(400).json({ 
+        message: 'Please provide a valid 10-digit phone number' 
+      });
+    }
 
     const userExists = await User.findOne({ email });
     if (userExists) {
-      return res.status(400).json({ message: 'User already exists' });
+      return res.status(400).json({ message: 'Email already exists' });
+    }
+    
+    const phoneExists = await User.findOne({ phone });
+    if (phoneExists) {
+      return res.status(400).json({ message: 'Phone number already registered' });
     }
 
     const user = await User.create({
       name,
       email,
+      phone,
       password
     });
 
     if (user) {
+      // Send welcome SMS
+      await smsService.sendSMS(phone, `Welcome ${name}! Thank you for registering with Restaurant & Bakery. Start ordering delicious food now!`);
+      
       res.status(201).json({
         _id: user._id,
         name: user.name,
         email: user.email,
+        phone: user.phone,
         role: user.role,
         token: generateToken(user._id)
       });
@@ -46,6 +64,7 @@ const loginUser = async (req, res) => {
         _id: user._id,
         name: user.name,
         email: user.email,
+        phone: user.phone,
         role: user.role,
         token: generateToken(user._id)
       });
